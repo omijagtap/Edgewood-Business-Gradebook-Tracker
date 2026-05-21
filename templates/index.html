@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Edgewood Discussion Tracker</title>
+    <title>Edgewood Business Gradebook Tracker</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -48,19 +48,28 @@
           100% { background-position: 200% 0; }
       }
 
-      /* Sleek, low, non-white silvery shimmer for headers */
-      .silver-shimmer {
-          background: linear-gradient(135deg,
-              #94a3b8 0%,
-              #cbd5e1 35%,
-              #f1f5f9 50%,
-              #cbd5e1 65%,
-              #94a3b8 100%);
-          background-size: 300% 300%;
+      /* Premium sweeping shiny text effect similar to React UI libraries */
+      .shiny-text {
+          background: linear-gradient(
+              120deg, 
+              #94a3b8 25%, 
+              #f8fafc 50%, 
+              #94a3b8 75%
+          );
+          background-size: 250% auto;
           -webkit-background-clip: text;
           background-clip: text;
           -webkit-text-fill-color: transparent;
-          animation: shimmer 10s ease-in-out infinite;
+          animation: shine-sweep 0.01s linear infinite;
+      }
+
+      @keyframes shine-sweep {
+          0% {
+              background-position: 250% center;
+          }
+          100% {
+              background-position: -250% center;
+          }
       }
 
       /* Focus transitions for input */
@@ -99,27 +108,27 @@
                     <span class="text-[10px] font-semibold text-[#4ade80] uppercase tracking-widest" style="letter-spacing: 0.15em;">System Live</span>
                 </div>
                 
-                <h1 class="text-3xl lg:text-4xl font-extrabold mb-5 tracking-tight silver-shimmer leading-snug drop-shadow-sm">Edgewood Education <br/>Discussion Tracker</h1>
+                <h1 class="text-3xl lg:text-4xl font-extrabold mb-5 tracking-tight shiny-text leading-snug drop-shadow-sm">Edgewood Business <br/>Gradebook Tracker</h1>
                 
                 <p class="text-[rgba(255,255,255,0.6)] text-sm mb-8 leading-relaxed font-light">
-                    Automate your Education discussion forum audits. Instead of manually searching Canvas to find out which learner has raised a query and whether a TA has replied, this tool pulls all the activity instantly.
+                    Automate your Gradebook reporting. Instead of manually searching Canvas to check submission statuses, scores, and assignments that need grading, this tool pulls all student gradebook records and compiles them instantly.
                 </p>
                 
-                <h3 class="text-[11px] font-bold mb-5 pb-3 border-b border-[rgba(255,255,255,0.08)] silver-shimmer uppercase tracking-widest w-full">How it works</h3>
+                <h3 class="text-[11px] font-bold mb-5 pb-3 border-b border-[rgba(255,255,255,0.08)] shiny-text uppercase tracking-widest w-full">How it works</h3>
                 
                 <!-- Left-aligned list items -->
                 <ul class="space-y-5 text-[rgba(255,255,255,0.6)] text-xs font-light w-full">
                     <li class="flex items-start gap-3.5 group">
                         <div class="bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.15)] group-hover:bg-[rgba(238,44,60,0.1)] group-hover:border-[#EE2C3C] text-white/90 w-7 h-7 rounded-full flex items-center justify-center font-medium shadow-sm flex-shrink-0 mt-0.5 transition-all">1</div>
-                        <div class="pt-1"><strong class="silver-shimmer font-medium text-[13px]">Fetch Queries:</strong> Connects to Canvas and pulls all posts.</div>
+                        <div class="pt-1"><strong class="shiny-text font-medium text-[13px]">Fetch Submissions:</strong> Connects to Canvas and retrieves student enrollments, assignments, and submissions.</div>
                     </li>
                     <li class="flex items-start gap-3.5 group">
                         <div class="bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.15)] group-hover:bg-[rgba(238,44,60,0.1)] group-hover:border-[#EE2C3C] text-white/90 w-7 h-7 rounded-full flex items-center justify-center font-medium shadow-sm flex-shrink-0 mt-0.5 transition-all">2</div>
-                        <div class="pt-1"><strong class="silver-shimmer font-medium text-[13px]">Track Responses:</strong> Identifies TA replies and calculates durations.</div>
+                        <div class="pt-1"><strong class="shiny-text font-medium text-[13px]">Track Statuses:</strong> Identifies graded items, late submissions, resubmissions, and missing work.</div>
                     </li>
                     <li class="flex items-start gap-3.5 group">
                         <div class="bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.15)] group-hover:bg-[rgba(238,44,60,0.1)] group-hover:border-[#EE2C3C] text-white/90 w-7 h-7 rounded-full flex items-center justify-center font-medium shadow-sm flex-shrink-0 mt-0.5 transition-all">3</div>
-                        <div class="pt-1"><strong class="silver-shimmer font-medium text-[13px]">Analyze SLAs:</strong> Checks if the reply was within the time frame.</div>
+                        <div class="pt-1"><strong class="shiny-text font-medium text-[13px]">Compile Reports:</strong> Structures the data into a pivot table showing all assignments and grades per student.</div>
                     </li>
                 </ul>
             </div>
@@ -129,33 +138,33 @@
 
             <!-- Right Side: Input & Form -->
             <div class="lg:w-1/2 flex flex-col justify-center relative z-10 lg:pl-4">
-                <h2 class="text-2xl lg:text-3xl font-bold mb-3 silver-shimmer tracking-tight">Generate Report</h2>
-                <p class="text-[rgba(255,255,255,0.6)] mb-8 text-sm font-light">Enter the course codes below to generate your comprehensive audit report in Excel.</p>
+                <h2 class="text-2xl lg:text-3xl font-bold mb-3 shiny-text tracking-tight">Generate Report</h2>
+                <p class="text-[rgba(255,255,255,0.6)] mb-8 text-sm font-light">Enter course names or numeric IDs below to generate your comprehensive gradebook report in Excel.</p>
                 
                 <form id="tracker-form" class="space-y-6 w-full">
                     <div class="w-full relative">
                         <label class="block text-[10px] font-semibold text-white/60 mb-2.5 uppercase tracking-widest text-left" for="course_codes">
-                            Course Code(s)
+                            Course Name(s) or ID(s)
                         </label>
                         <input 
                             type="text" 
                             id="course_codes" 
                             name="course_codes" 
-                            placeholder="e.g. EDU-862-UED4--Spring-2026" 
+                            placeholder="e.g. BUS-600, 1571, BUS-610" 
                             required
                             class="input-glow w-full bg-[rgba(0,0,0,0.3)] border border-[rgba(255,255,255,0.12)] text-white text-left text-sm rounded-xl px-5 py-4 focus:outline-none transition-all shadow-inner placeholder-[rgba(255,255,255,0.15)] backdrop-blur-sm"
                         />
                         <div class="mt-4 p-4 rounded-xl bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.04)] backdrop-blur-sm text-left hover:bg-[rgba(255,255,255,0.03)] transition-colors">
                             <p class="text-[11px] text-[rgba(255,255,255,0.5)] leading-relaxed font-light">
-                                <strong class="text-white/80 font-medium">What is a course code?</strong><br/>
-                                The course code is the SIS ID from Canvas. You can enter multiple IDs separated by commas. Note: This tool only processes Education (EDU) courses.
-                                <br/><br/><span class="text-white/40">Example:</span><br/> <code class="bg-[rgba(255,255,255,0.06)] border border-[rgba(255,255,255,0.1)] text-white/90 px-2.5 py-1.5 rounded text-[11px] mt-1.5 inline-block font-medium shadow-sm break-all font-mono">EDU-862-UED4--Spring-2026</code>
+                                <strong class="text-white/80 font-medium">What course terms are supported?</strong><br/>
+                                You can enter multiple Course Names or IDs separated by commas. The system will automatically search Canvas to match the courses and build the report.
+                                <br/><br/><span class="text-white/40">Example:</span><br/> <code class="bg-[rgba(255,255,255,0.06)] border border-[rgba(255,255,255,0.1)] text-white/90 px-2.5 py-1.5 rounded text-[11px] mt-1.5 inline-block font-medium shadow-sm break-all font-mono">BUS-600, 1571, BUS-610</code>
                             </p>
                         </div>
                     </div>
                     
                     <button type="submit" id="submit-btn" class="w-full py-3.5 bg-white/10 hover:bg-white/15 text-white text-sm font-semibold rounded-xl transition-all flex justify-center items-center gap-2.5 border border-[rgba(255,255,255,0.2)] shadow-lg backdrop-blur-md group hover:border-[rgba(255,255,255,0.3)] hover:shadow-xl">
-                        <span id="btn-text">Download Audit Report</span>
+                        <span id="btn-text">Download Gradebook Report</span>
                         <svg id="btn-icon" class="w-4 h-4 opacity-80 transform group-hover:translate-y-0.5 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
                     </button>
 
@@ -193,7 +202,7 @@
             // UI State change to loading
             btn.classList.add('bg-[rgba(255,255,255,0.03)]', 'text-[rgba(255,255,255,0.4)]', 'pointer-events-none');
             btn.classList.remove('bg-white/10', 'hover:bg-white/15', 'text-white', 'shadow-lg');
-            btnText.innerHTML = 'Audit in Progress...';
+            btnText.innerHTML = 'Report Generation in Progress...';
             btnIcon.classList.add('hidden');
             
             // Show terminal
@@ -224,7 +233,7 @@
                         
                         if (status === 'COMPLETE') {
                             clearInterval(poll);
-                            progText.innerHTML = '<span class="text-[#4ade80]">✔ Audit Completed! Downloading Excel File...</span>';
+                            progText.innerHTML = '<span class="text-[#4ade80]">✔ Report Completed! Downloading Excel File...</span>';
                             setTimeout(() => {
                                 window.location.href = '/download/' + taskId;
                                 setTimeout(resetUI, 2000);
@@ -247,7 +256,7 @@
                 // Revert button
                 btn.classList.remove('bg-[rgba(255,255,255,0.03)]', 'text-[rgba(255,255,255,0.4)]', 'pointer-events-none');
                 btn.classList.add('bg-white/10', 'hover:bg-white/15', 'text-white', 'shadow-lg');
-                btnText.innerHTML = 'Download Audit Report';
+                btnText.innerHTML = 'Download Gradebook Report';
                 btnIcon.classList.remove('hidden');
                 
                 // Hide terminal

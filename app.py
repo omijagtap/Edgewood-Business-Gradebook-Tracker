@@ -4,14 +4,14 @@ import time
 import uuid
 import threading
 import builtins
-import openpyxl
-from flask import Flask, render_template, request, send_file, jsonify, redirect, url_for
+import requests
+import pandas as pd
+import concurrent.futures
+from flask import Flask, render_template, request, send_file, jsonify
 from dotenv import load_dotenv
 
 # Load env variables
 load_dotenv()
-
-import Disussion_Automate as da
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'edgewood_secret_key_default')
@@ -29,10 +29,8 @@ def custom_print(*args, **kwargs):
     text = " ".join(str(a) for a in args)
     if current_task_id and text.strip():
         clean_text = text.strip()
-        # Make the prints look cooler and more readable for the UI
-        if "Processing thread" in clean_text:
-            clean_text = clean_text.replace("Processing thread:", "Analyzing Topic:")
-        elif "Fetching" in clean_text:
+        # Clean up prints for the UI
+        if "Fetching" in clean_text:
             clean_text = f"Connecting to Canvas: {clean_text}"
             
         # Ignore empty lines or simple separators
@@ -43,6 +41,259 @@ def custom_print(*args, **kwargs):
 
 builtins.print = custom_print
 
+# --- Canvas API Constants ---
+API_URL = os.getenv("CANVAS_API_URL", "https://edgewood.instructure.com/api/v1")
+ACCESS_TOKEN = os.getenv("CANVAS_ACCESS_TOKEN", "")
+HEADERS = {"Authorization": f"Bearer {ACCESS_TOKEN}"}
+
+def get_all_pages(url, headers, params=None):
+    results = []
+    while url:
+        try:
+            response = requests.get(url, headers=headers, params=params, timeout=20)
+            if response.status_code != 200:
+                break
+            data = response.json()
+            if isinstance(data, list):
+                results.extend(data)
+            else:
+                results.append(data)
+            url = response.links.get('next', {}).get('url')
+            params = None  # Params are already in the 'next' url
+        except Exception as e:
+            print(f"Exception during pagination: {e}")
+            break
+    return results
+
+def resolve_course_details(search_term):
+    """
+    Finds course ID and Name by searching across accounts or direct ID lookup.
+    """
+    print(f"Searching for course '{search_term}'...")
+    
+    # 1. If it's a numeric ID, try direct fetch
+    if search_term.isdigit():
+        resp = requests.get(f"{API_URL}/courses/{search_term}", headers=HEADERS)
+        if resp.status_code == 200:
+            c = resp.json()
+            return c.get('id'), c.get('name')
+
+    # 2. Search in user's active courses
+    courses = get_all_pages(f"{API_URL}/courses", HEADERS, params={"per_page": 100, "state[]": "available"})
+    seen_ids = set()
+    matched = []
+    for c in courses:
+        name = str(c.get('name', '')).lower()
+        code = str(c.get('course_code', '')).lower()
+        cid = str(c.get('id', ''))
+        term = search_term.lower()
+        if term == cid or term in name or term in code:
+            if cid not in seen_ids:
+                seen_ids.add(cid)
+                matched.append(c)
+
+    # 3. Search in specific accounts if no match found
+    if not matched:
+        for acc_id in [141, 105, 1, 13]:
+            acc_courses = get_all_pages(f"{API_URL}/accounts/{acc_id}/courses", HEADERS, params={"search_term": search_term, "per_page": 100})
+            for c in acc_courses:
+                cid = str(c.get('id', ''))
+                if cid not in seen_ids:
+                    seen_ids.add(cid)
+                    matched.append(c)
+
+    if not matched:
+        return None, None
+
+    # In web app, instead of input() prompt on ambiguity, we select the first match and print warning
+    if len(matched) > 1:
+        print(f"[WARNING] Multiple courses match '{search_term}'. Selecting first match:")
+        for i, c in enumerate(matched):
+            print(f"  [{i+1}] {c.get('name')} (ID: {c.get('id')})")
+        c = matched[0]
+        print(f"Selected: {c.get('name')} (ID: {c.get('id')})")
+        return c.get('id'), c.get('name')
+
+    c = matched[0]
+    return c.get('id'), c.get('name')
+
+def process_course_report(course_input):
+    course_id, course_name = resolve_course_details(course_input)
+    if not course_id:
+        print(f"[ERROR] Could not find course '{course_input}'. Skipping...")
+        return None
+        
+    print(f"Processing: {course_name} (ID: {course_id})")
+    
+    # 1. Fetch Students, Assignments and Submissions concurrently
+    print(f"Fetching student lists, assignments, and submissions concurrently for {course_name}...")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        enrollments_future = executor.submit(
+            get_all_pages,
+            f"{API_URL}/courses/{course_id}/enrollments", 
+            HEADERS, 
+            params={"type[]": "StudentEnrollment", "state[]": "active", "per_page": 100}
+        )
+        assignments_future = executor.submit(
+            get_all_pages,
+            f"{API_URL}/courses/{course_id}/assignments", 
+            HEADERS, 
+            params={"per_page": 100}
+        )
+        submissions_future = executor.submit(
+            get_all_pages,
+            f"{API_URL}/courses/{course_id}/students/submissions", 
+            HEADERS, 
+            params={"student_ids[]": "all", "per_page": 100}
+        )
+        
+        enrollments = enrollments_future.result()
+        assignments_list = assignments_future.result()
+        submissions = submissions_future.result()
+        
+    if not enrollments:
+        print(f"No active students found for course {course_id}. Skipping...")
+        return None
+
+    students = {}
+    for e in enrollments:
+        u = e.get("user", {})
+        uid = e.get("user_id")
+        if uid not in students:
+            students[uid] = {
+                "Student ID": u.get("sis_user_id") or e.get("sis_user_id") or "N/A",
+                "Learner Name": u.get("name", "N/A"),
+                "Official Email": u.get("email") or u.get("login_id") or "N/A"
+            }
+
+    # Fallback to resolve student IDs if they are missing (N/A)
+    has_missing_sis = any(s["Student ID"] == "N/A" for s in students.values())
+    if has_missing_sis:
+        print("SIS User IDs (Student IDs) are missing. Attempting fallback token to resolve them...")
+        fallback_token = os.getenv("CANVAS_FALLBACK_TOKEN", "")
+        fallback_headers = {"Authorization": f"Bearer {fallback_token}"} if fallback_token else {}
+        fallback_enrollments = get_all_pages(
+            f"{API_URL}/courses/{course_id}/enrollments", 
+            fallback_headers, 
+            params={"type[]": "StudentEnrollment", "state[]": "active", "per_page": 100}
+        )
+        for fe in fallback_enrollments:
+            fuid = fe.get("user_id")
+            fsis = fe.get("sis_user_id") or fe.get("user", {}).get("sis_user_id")
+            if fuid in students and fsis:
+                students[fuid]["Student ID"] = fsis
+
+    # Process Assignments
+    assignments = {}
+    for a in assignments_list:
+        due_at = a.get("due_at")
+        if due_at:
+            due_date = due_at.split("T")[0]
+            title = f"{a.get('name')} ({a.get('id')}) (Due: {due_date})"
+        else:
+            title = f"{a.get('name')} ({a.get('id')}) (No Due Date)"
+        assignments[a.get("id")] = title
+
+    # Prepare Data for Pivoting
+    data = []
+    for uid, s_info in students.items():
+        for aid, a_title in assignments.items():
+            data.append({
+                "uid": uid,
+                "Student ID": s_info["Student ID"],
+                "Learner Name": s_info["Learner Name"],
+                "Official Email": s_info["Official Email"],
+                "Assignment": a_title,
+                "Status": "No Submission"
+            })
+
+    submission_map = {}
+    for sub in submissions:
+        uid = sub.get("user_id")
+        aid = sub.get("assignment_id")
+        if uid not in students or aid not in assignments: continue
+            
+        s_info = students[uid]
+        a_title = assignments[aid]
+        
+        score = sub.get("score")
+        workflow_state = sub.get("workflow_state")
+        grade_matches = sub.get("grade_matches_current_submission", True)
+        attempt = sub.get("attempt") or 0
+        
+        status = "No Submission"
+
+        # Check if it is ungraded or resubmitted
+        is_needs_grading = (workflow_state in ("submitted", "pending_review")) or (grade_matches is False)
+
+        if is_needs_grading:
+            submitted_at = sub.get("submitted_at")
+            cached_due_date = sub.get("cached_due_date")
+            date_str = submitted_at.split("T")[0] if submitted_at else "No Date"
+            
+            is_late = sub.get("late") or sub.get("late_policy_status") == "late"
+            if not is_late and submitted_at and cached_due_date:
+                if submitted_at > cached_due_date:
+                    is_late = True
+
+            if (attempt > 1) or (not grade_matches):
+                status = f"Resubmitted - Need Grading ({date_str})"
+            elif is_late:
+                status = f"Late Submission - Need Grading ({date_str})"
+            else:
+                status = f"Needs Grading ({date_str})"
+        elif workflow_state == "graded":
+            status = str(round(float(score), 2)) if score is not None else "0"
+        elif workflow_state == "unsubmitted":
+            status = "No Submission"
+        
+        submission_map[(uid, a_title)] = status
+
+    for item in data:
+        key = (item["uid"], item["Assignment"])
+        if key in submission_map:
+            item["Status"] = submission_map[key]
+
+    # Create DataFrame and Pivot
+    df = pd.DataFrame(data)
+    if df.empty:
+        print(f"[ERROR] No gradebook entries to compile for {course_name}. Skipping...")
+        return None
+
+    pivot_df = df.pivot_table(
+        index=["uid", "Student ID", "Learner Name", "Official Email"], 
+        columns="Assignment", 
+        values="Status", 
+        aggfunc='first'
+    ).reset_index()
+    pivot_df = pivot_df.drop(columns=["uid"])
+
+    def get_needs_grading(row):
+        needs = [
+            col for col in pivot_df.columns 
+            if any(status in str(row[col]) for status in ["Needs Grading", "Late Submission", "Resubmitted"])
+        ]
+        return ", ".join(needs) if needs else ""
+
+    pivot_df["Assignments to Grade"] = pivot_df.apply(get_needs_grading, axis=1)
+    student_cols = ["Learner Name", "Student ID", "Official Email", "Assignments to Grade"]
+    assign_cols = sorted([c for c in pivot_df.columns if c not in student_cols])
+    pivot_df = pivot_df[student_cols + assign_cols]
+    pivot_df = pivot_df.sort_values(by="Assignments to Grade", key=lambda x: x == "", ascending=True)
+
+    print(f"[SUCCESS] Compiled {len(students)} students and {len(assignments)} assignments for {course_name}.")
+    needs_count = len(pivot_df[pivot_df["Assignments to Grade"] != ""])
+    if needs_count > 0:
+        print(f"[INFO] {needs_count} students need grading in {course_name}.")
+        
+    return {
+        "course_id": course_id,
+        "course_name": course_name,
+        "df": pivot_df,
+        "students_count": len(students),
+        "assignments_count": len(assignments)
+    }
+
 def run_audit(task_id, course_codes_input):
     global current_task_id
     current_task_id = task_id
@@ -50,70 +301,63 @@ def run_audit(task_id, course_codes_input):
     
     try:
         if "," in course_codes_input:
-            sis_ids = [s.strip() for s in course_codes_input.split(",") if s.strip()]
+            course_list = [c.strip() for c in course_codes_input.split(",") if c.strip()]
         else:
-            sis_ids = [s.strip() for s in course_codes_input.split() if s.strip()]
+            course_list = [c.strip() for c in course_codes_input.split() if c.strip()]
 
-        if not sis_ids:
-            task_progress[task_id] = "ERROR: No valid SIS IDs found in input."
+        if not course_list:
+            task_progress[task_id] = "ERROR: No valid Course codes or IDs found in input."
             return
 
-        if not da.check_connection():
-            task_progress[task_id] = "ERROR: API connection failed. Check your token."
-            return
-
-        wb = openpyxl.Workbook()
+        # Prepare in-memory Excel file
+        output = io.BytesIO()
         processed_count = 0
 
-        for sis_id in sis_ids:
-            # Education Tracker specific filter
-            if not sis_id.upper().startswith("EDU"):
-                task_progress[task_id] = f"Skipping {sis_id} (Not an Education course)."
-                time.sleep(1)
-                continue
+        # We'll run the course reports concurrently using thread pool
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(course_list), 5)) as executor:
+            futures = {executor.submit(process_course_report, course_input): course_input for course_input in course_list}
+            for future in concurrent.futures.as_completed(futures):
+                course_input = futures[future]
+                try:
+                    res = future.result()
+                    if res:
+                        results.append(res)
+                except Exception as exc:
+                    print(f"[ERROR] Course {course_input} generated an exception: {exc}")
 
-            task_progress[task_id] = f"Locating Course: {sis_id}..."
-            course = da.find_course(sis_id)
-            if not course:
-                task_progress[task_id] = f"Could not find Course: {sis_id}. Skipping..."
-                time.sleep(1)
-                continue
-                
-            course_id = course["id"]
-            course_name = course.get("name", "Unknown Course")
-            
-            # This calls the original function which has all the print statements we intercept!
-            flat_rows = da.collect_consolidated_rows(course_id, sis_id, course_name)
-            
-            has_real_data = any(r.get("Learner Name") != "(No student posts yet)" for r in flat_rows)
-
-            if not flat_rows or not has_real_data:
-                task_progress[task_id] = f"No discussions found in {sis_id}. Skipping..."
-                time.sleep(1)
-                continue
-
-            task_progress[task_id] = "Compiling Data into Excel Structure..."
-            da.build_excel_sheet(wb, flat_rows, sis_id, course_name)
-            processed_count += 1
-
-        if processed_count == 0:
-            task_progress[task_id] = "ERROR: No student discussions found in any course."
+        if not results:
+            task_progress[task_id] = "ERROR: No courses were successfully processed."
             return
 
-        if "Sheet" in wb.sheetnames and len(wb.sheetnames) > 1:
-            del wb["Sheet"]
+        task_progress[task_id] = "Writing sheets into Excel workbook..."
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            for res in results:
+                course_id = res["course_id"]
+                course_name = res["course_name"]
+                pivot_df = res["df"]
+
+                # Clean sheet name to fit Excel limits
+                sheet_name = "".join(x for x in course_name if x.isalnum() or x in " -_").strip()
+                for c in [':', '\\', '/', '?', '*', '[', ']']:
+                    sheet_name = sheet_name.replace(c, '')
+                sheet_name = sheet_name[:30]
+                if not sheet_name:
+                    sheet_name = f"Course_{course_id}"
+
+                pivot_df.to_excel(writer, sheet_name=sheet_name, index=False)
+                processed_count += 1
 
         task_progress[task_id] = "Finalizing Output File..."
-        output = io.BytesIO()
-        wb.save(output)
         output.seek(0)
         
+        safe_first_name = "".join(x for x in course_list[0] if x.isalnum() or x in " -_").strip()
         task_results[task_id] = {
             "file": output,
-            "filename": f"MultiCourse_Discussion_Audit_{sis_ids[0].replace(' ', '_')}.xlsx"
+            "filename": f"Gradebook_Report_{safe_first_name}.xlsx"
         }
         
-        time.sleep(0.5) # Slight pause to let UI catch up
+        time.sleep(0.5)
         task_progress[task_id] = "COMPLETE"
     except Exception as e:
         task_progress[task_id] = f"ERROR: {str(e)}"
@@ -129,12 +373,12 @@ def start_audit():
     data = request.json
     course_codes_input = data.get('course_codes', '')
     if not course_codes_input:
-        return jsonify({"error": "Please enter at least one course code."}), 400
+        return jsonify({"error": "Please enter at least one course code or ID."}), 400
         
     task_id = str(uuid.uuid4())
-    task_progress[task_id] = "Warming up Audit Engine..."
+    task_progress[task_id] = "Warming up Gradebook Report Engine..."
     
-    # Run the scraping in a background thread
+    # Run the report generation in a background thread
     thread = threading.Thread(target=run_audit, args=(task_id, course_codes_input))
     thread.start()
     
@@ -158,4 +402,4 @@ def download(task_id):
     return "File not found or expired.", 404
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000, threaded=True)
+    app.run(debug=True, port=5001, threaded=True)
