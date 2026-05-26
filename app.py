@@ -94,13 +94,29 @@ def resolve_course_details(search_term):
 
     # 3. Search in specific accounts if no match found
     if not matched:
-        for acc_id in [141, 105, 1, 13]:
-            acc_courses = get_all_pages(f"{API_URL}/accounts/{acc_id}/courses", HEADERS, params={"search_term": search_term, "per_page": 100})
-            for c in acc_courses:
-                cid = str(c.get('id', ''))
-                if cid not in seen_ids:
-                    seen_ids.add(cid)
-                    matched.append(c)
+        try:
+            accounts = get_all_pages(f"{API_URL}/accounts", HEADERS)
+            acc_ids = [acc.get('id') for acc in accounts if acc.get('id')]
+        except Exception as e:
+            print(f"Exception fetching accounts: {e}")
+            acc_ids = []
+
+        # Fallback to hardcoded accounts (including 177)
+        for fallback_id in [141, 177, 105, 1, 13]:
+            if fallback_id not in acc_ids:
+                acc_ids.append(fallback_id)
+
+        for acc_id in acc_ids:
+            try:
+                acc_courses = get_all_pages(f"{API_URL}/accounts/{acc_id}/courses", HEADERS, params={"search_term": search_term, "per_page": 100})
+                for c in acc_courses:
+                    cid = str(c.get('id', ''))
+                    if cid not in seen_ids:
+                        seen_ids.add(cid)
+                        matched.append(c)
+            except Exception as e:
+                # Silently handle permission errors for specific accounts
+                pass
 
     if not matched:
         return None, None
@@ -160,10 +176,27 @@ def process_course_report(course_input):
         u = e.get("user", {})
         uid = e.get("user_id")
         if uid not in students:
+            # Extract score and grade
+            grades_info = e.get("grades", {})
+            current_score = grades_info.get("current_score")
+            current_grade = grades_info.get("current_grade")
+            
+            if current_score is not None:
+                total_percentage = f"{round(float(current_score), 2)}%"
+            else:
+                total_percentage = "0.0%"
+                
+            if current_grade is not None:
+                total_grade = current_grade
+            else:
+                total_grade = "F"
+
             students[uid] = {
                 "Student ID": u.get("sis_user_id") or e.get("sis_user_id") or "N/A",
                 "Learner Name": u.get("name", "N/A"),
-                "Official Email": u.get("email") or u.get("login_id") or "N/A"
+                "Official Email": u.get("email") or u.get("login_id") or "N/A",
+                "Total Percentage": total_percentage,
+                "Total Grade": total_grade
             }
 
     # Fallback to resolve student IDs if they are missing (N/A)
@@ -180,8 +213,18 @@ def process_course_report(course_input):
         for fe in fallback_enrollments:
             fuid = fe.get("user_id")
             fsis = fe.get("sis_user_id") or fe.get("user", {}).get("sis_user_id")
-            if fuid in students and fsis:
-                students[fuid]["Student ID"] = fsis
+            if fuid in students:
+                if fsis:
+                    students[fuid]["Student ID"] = fsis
+                # Also resolve Total Percentage and Total Grade from fallback if they were defaulted
+                if students[fuid]["Total Percentage"] == "0.0%" and students[fuid]["Total Grade"] == "F":
+                    grades_info = fe.get("grades", {})
+                    current_score = grades_info.get("current_score")
+                    current_grade = grades_info.get("current_grade")
+                    if current_score is not None:
+                        students[fuid]["Total Percentage"] = f"{round(float(current_score), 2)}%"
+                    if current_grade is not None:
+                        students[fuid]["Total Grade"] = current_grade
 
     # Process Assignments
     assignments = {}
@@ -203,6 +246,8 @@ def process_course_report(course_input):
                 "Student ID": s_info["Student ID"],
                 "Learner Name": s_info["Learner Name"],
                 "Official Email": s_info["Official Email"],
+                "Total Percentage": s_info["Total Percentage"],
+                "Total Grade": s_info["Total Grade"],
                 "Assignment": a_title,
                 "Status": "No Submission"
             })
@@ -261,7 +306,7 @@ def process_course_report(course_input):
         return None
 
     pivot_df = df.pivot_table(
-        index=["uid", "Student ID", "Learner Name", "Official Email"], 
+        index=["uid", "Student ID", "Learner Name", "Official Email", "Total Percentage", "Total Grade"], 
         columns="Assignment", 
         values="Status", 
         aggfunc='first'
@@ -277,8 +322,9 @@ def process_course_report(course_input):
 
     pivot_df["Assignments to Grade"] = pivot_df.apply(get_needs_grading, axis=1)
     student_cols = ["Learner Name", "Student ID", "Official Email", "Assignments to Grade"]
-    assign_cols = sorted([c for c in pivot_df.columns if c not in student_cols])
-    pivot_df = pivot_df[student_cols + assign_cols]
+    end_cols = ["Total Percentage", "Total Grade"]
+    assign_cols = sorted([c for c in pivot_df.columns if c not in (student_cols + end_cols)])
+    pivot_df = pivot_df[student_cols + assign_cols + end_cols]
     pivot_df = pivot_df.sort_values(by="Assignments to Grade", key=lambda x: x == "", ascending=True)
 
     print(f"[SUCCESS] Compiled {len(students)} students and {len(assignments)} assignments for {course_name}.")
