@@ -395,11 +395,12 @@ def run_audit(task_id, course_codes_input):
                 processed_count += 1
 
         task_progress[task_id] = "Finalizing Output File..."
-        output.seek(0)
+        excel_data = output.getvalue()
+        output.close()
         
         safe_first_name = "".join(x for x in course_list[0] if x.isalnum() or x in " -_").strip()
         task_results[task_id] = {
-            "file": output,
+            "file": io.BytesIO(excel_data),
             "filename": f"Gradebook_Report_{safe_first_name}.xlsx"
         }
         
